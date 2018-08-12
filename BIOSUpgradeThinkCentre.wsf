@@ -1,0 +1,112 @@
+﻿<job id="BIOSUpgradeThinkCenter">
+	<script language="VBScript" src="ZTIUtility.vbs"/>
+	<script language="VBScript">
+
+	'
+	' By Diagg/OSD-Couture.com
+	' Version: 3.0
+	' Release Date 05/07/2018
+	' Latest Release: 23/07/2018
+	'
+	' Purpose: This Script allow to upgrade Lenovo Thinkcenter BIOS that requieres a true (s5) Shutdown
+	' The script will edit BIOS setting to schedule a restart
+	' A WinPe image will also be installed on the hard disk to allow the TS to recover
+	'
+	' Credit: Genius idea by Nicke Källén (@znackattack) - http://www.applepie.se/task-sequence-and-shutdown-not-reboot-a-computer-and-continue 
+	'
+	'05/07/2018	1.0	Initial Release
+	'23/07/2018	3.0	Added support under Windows
+	
+
+
+	Option Explicit
+		RunNewInstance
+
+		Class BIOSUpgradeThinkCenter
+
+			Function Main
+
+				Dim Bootpath, IsFinshed
+				Dim oItem, oFolder, oFile, oRomFile
+				
+				If not oUtility.Arguments.Exists("BiosPath") Then
+					oLogging.CreateEntry "[ERROR]BiosPath Argument missing, unable to continue... Aborting!!!" , LogTypeError
+					Wscript.Quit
+				Else
+					oLogging.CreateEntry "BiosPath Argument detected, value=" & oUtility.Arguments.item("BiosPath") , LogTypeInfo
+				End If
+				
+				
+
+				'##### Relaunching Script Asynchronously !!!
+				Set oFile = oFSO.GetFile(wscript.fullname)
+				If oEnvironment.Item("IsRebooted") <> "true" Then
+					oLogging.CreateEntry "This is Instance V1 !" , LogTypeInfo
+					
+					'##### Installing WinPE on Disk for next Reboot in 60 sec !!!
+					If oEnvironment.Item("OSVersion") = "WinPE" Then oEnvironment.Item("SMSTSRebootRequested") = "WinPE" Else oEnvironment.Item("SMSTSRebootRequested") = "true"
+					oEnvironment.Item("SMSTSRebootDelay") = "60"
+					oEnvironment.Item("SMSTSRebootMessage") = "BIOS Upgrade - This computer will reboot in a feew seconds !!!"
+					oEnvironment.Item("IsRebooted") = "true"	
+					
+					oLogging.CreateEntry "Asynchronous Relaunch Initiated!!!" , LogTypeInfo
+					oShell.Run "Cscript.exe " & wscript.ScriptName & " /debugcapture /BiosPath:" & oUtility.Arguments.item("BiosPath"),0,false
+					Wscript.Quit
+				End If			
+				
+				oLogging.CreateEntry "This is Instance V2, running Asynchronously " , LogTypeInfo	
+				
+				IsFinshed = False
+				
+				While IsFinshed = False
+				
+					oUtility.SafeSleep 2000
+				
+					Bootpath = split(oEnvironment.Item("TSUEFIDrive"),":")
+					
+					If Len(Bootpath(0)) > 1 Then
+						oLogging.CreateEntry "TSUEFIDrive prepped for reboot, value = " & oEnvironment.Item("TSUEFIDrive"), LogTypeInfo
+						IsFinshed = True
+					End If
+
+				Wend	
+
+				oLogging.CreateEntry "Executing command that needs to reboot" , LogTypeInfo
+
+				oLogging.CreateEntry "Upgrading Bios" , LogTypeInfo
+				
+				'##### Searching for BIOS firmware (.rom)
+				oLogging.CreateEntry "Searching ROM file in " & oUtility.Arguments.item("BiosPath") & "\Firmware" , LogTypeInfo
+				Set oFolder = oFSO.GetFolder(oUtility.Arguments.item("BiosPath") & "\Firmware")
+				Set oItem = oFolder.Files
+				
+				For Each oFile in oItem
+					If instr(Ucase(oFile.path),".ROM")>0 Then
+						oRomFile = oFile.Name
+						oLogging.CreateEntry "ROM File " & oFile.Name & " found in folder " & oUtility.Arguments.item("BiosPath") & "\Firmware" , LogTypeInfo
+						Exit For
+					End If					
+				Next
+				
+				If oRomFile="" Then
+					oLogging.CreateEntry "[ERROR]Unable to file any .ROM file in path" & oUtility.Arguments.item("BiosPath") & "\Firmware, Aborting!!!" , LogTypeError
+					Wscript.Quit				
+				End If
+				
+				oLogging.CreateEntry "Executing cmd.exe /c " & oUtility.Arguments.item("BiosPath") &"\Firmware\wflash2x64.exe "  & oRomFile & " /bb /rsmb /quiet /sccm /ign" , LogTypeInfo				
+				oShell.Run "cmd.exe /c " & oUtility.Arguments.item("BiosPath") &"\Firmware\wflash2x64.exe "  & oRomFile & " /bb /rsmb /quiet /sccm /ign ",1,true
+
+				oLogging.CreateEntry "Iniating savage Reboot" , LogTypeInfo	
+				
+				'##### Shutting Down
+				If oEnvironment.Item("OSVersion") = "WinPE" Then oShell.Run "wpeutil shutdown" Else oShell.Run "shutdown /s /f /t 0"
+				
+				Main = SUCCESS
+
+			End Function
+	
+
+		End class
+
+	</script>
+</job>
